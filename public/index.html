@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ARCONEXO - Batalha Estratégica Online</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+
+  <!-- MODAL 1: LOGIN -->
+  <div id="modal-login" class="screen-overlay">
+    <div class="ancient-card">
+      <h1 class="glow-title">ARCONEXO</h1>
+      <p class="subtitle">Batalha Estratégica de Cartas e Tabuleiro</p>
+      
+      <div class="form-group">
+        <label>Nome do Jogador</label>
+        <input type="text" id="login-name" placeholder="Ex: Cavaleiro Negro" required>
+      </div>
+
+      <div class="form-group">
+        <label>Celular ou E-mail</label>
+        <input type="text" id="login-contact" placeholder="Ex: (11) 98888-7777 ou email@exemplo.com" required>
+      </div>
+
+      <button class="gold-btn" onclick="handleLogin()">Entrar na Arena</button>
+    </div>
+  </div>
+
+  <!-- MODAL 2: LOBBY -->
+  <div id="modal-lobby" class="screen-overlay" style="display: none;">
+    <div class="ancient-card">
+      <h2 class="glow-title">SALAS DE BATALHA</h2>
+      
+      <div class="tab-options">
+        <button class="tab-btn active" onclick="switchTab('multiplayer')">Jogar com Amigos</button>
+        <button class="tab-btn" onclick="switchTab('solo')">Solo vs Computador</button>
+      </div>
+
+      <div id="tab-multiplayer">
+        <div class="form-group">
+          <label>Código da Sala (para entrar)</label>
+          <input type="text" id="room-code" placeholder="Ex: sala-arconte-7">
+        </div>
+        <div class="form-group">
+          <label>Senha da Sala</label>
+          <input type="password" id="room-pass" placeholder="Digite a senha">
+        </div>
+        <button class="gold-btn" onclick="joinExistingRoom()">Entrar na Sala</button>
+        <button class="secondary-btn" onclick="createNewRoom()">Criar Nova Sala Privada</button>
+      </div>
+
+      <div id="tab-solo" style="display: none;">
+        <div class="form-group">
+          <label>Dificuldade do Computador</label>
+          <select id="bot-level">
+            <option value="Fácil">Fácil (Iniciante)</option>
+            <option value="Médio" selected>Médio (Estrategista)</option>
+            <option value="Difícil">Difícil (Mestre Arconte)</option>
+          </select>
+        </div>
+        <button class="gold-btn" onclick="startSoloMatch()">Iniciar Desafio Solo</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TELA PRINCIPAL DO JOGO -->
+  <main id="game-arena" style="display: none;">
+    
+    <!-- ÁREA CENTRAL DO TABULEIRO -->
+    <div class="board-frame">
+      <img src="tabuleiro.jpg" alt="Tabuleiro Hexagonal ARCONEXO" id="hexagonal-board">
+      
+      <div class="pot-container">
+        <span>POTE DA RODADA</span>
+        <strong id="pot-display">0 FICHAS</strong>
+      </div>
+    </div>
+
+    <!-- PAINEL SUPERIOR: INFORMAÇÕES DA SALA -->
+    <header class="game-header">
+      <div id="room-info-label">Sala: --</div>
+      <button id="btn-start" class="gold-btn-small" style="display:none;" onclick="requestStartGame()">INICIAR PARTIDA</button>
+    </header>
+
+    <!-- ASSENTOS DOS 6 JOGADORES AO REDOR DO TABULEIRO -->
+    <div class="seat seat-pos-1" id="seat-1">
+      <div class="seat-badge">Você</div>
+      <div class="seat-chips">100 Fichas</div>
+    </div>
+    <div class="seat seat-pos-2" id="seat-2"><div class="seat-badge">Vazio</div></div>
+    <div class="seat seat-pos-3" id="seat-3"><div class="seat-badge">Vazio</div></div>
+    <div class="seat seat-pos-4" id="seat-4"><div class="seat-badge">Vazio</div></div>
+    <div class="seat seat-pos-5" id="seat-5"><div class="seat-badge">Vazio</div></div>
+    <div class="seat seat-pos-6" id="seat-6"><div class="seat-badge">Vazio</div></div>
+
+    <!-- MÃO DE CARTAS DO JOGADOR LOCAL -->
+    <footer class="player-dock">
+      <div class="status-gauge">
+        <div>SOMA BLACKJACK: <strong id="my-score">0</strong> / 21</div>
+        <div>FICHAS: <strong id="my-chips">100</strong></div>
+      </div>
+
+      <div class="cards-hand" id="hand-display"></div>
+
+      <div class="action-buttons">
+        <button id="btn-hit" class="action-btn" onclick="playerHit()">Comprar Carta</button>
+        <button id="btn-stand" class="action-btn" onclick="playerStand()">Parar (Manter)</button>
+        <button id="btn-discard" class="action-btn discard-btn" onclick="playerDiscard()" disabled>Descartar 1 (Alívio)</button>
+      </div>
+    </footer>
+
+  </main>
+
+  <script>
+    const socket = io();
+    let myData = { name: '', contact: '', hand: [], arconte: null, isHost: false };
+    let currentRoomId = '';
+
+    function handleLogin() {
+      const name = document.getElementById('login-name').value.trim();
+      const contact = document.getElementById('login-contact').value.trim();
+      if (!name || !contact) return alert('Preencha seu Nome e Contato para continuar!');
+      myData.name = name;
+      myData.contact = contact;
+      document.getElementById('modal-login').style.display = 'none';
+      document.getElementById('modal-lobby').style.display = 'flex';
+    }
+
+    function switchTab(tab) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      if (tab === 'multiplayer') {
+        document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
+        document.getElementById('tab-multiplayer').style.display = 'block';
+        document.getElementById('tab-solo').style.display = 'none';
+      } else {
+        document.querySelector('.tab-btn:nth-child(2)').classList.add('active');
+        document.getElementById('tab-multiplayer').style.display = 'none';
+        document.getElementById('tab-solo').style.display = 'block';
+      }
+    }
+
+    function createNewRoom() {
+      const roomId = 'arconexo-' + Math.random().toString(36).substring(2, 7);
+      const password = prompt('Defina uma senha simples para os amigos entrarem:', '1234');
+      if (password === null) return;
+      currentRoomId = roomId;
+      socket.emit('createRoom', { roomId, password, playerName: myData.name, userContact: myData.contact });
+    }
+
+    function joinExistingRoom() {
+      const roomId = document.getElementById('room-code').value.trim();
+      const password = document.getElementById('room-pass').value.trim();
+      if (!roomId) return alert('Digite o código da sala!');
+      currentRoomId = roomId;
+      socket.emit('joinRoom', { roomId, password, playerName: myData.name, userContact: myData.contact });
+    }
+
+    function startSoloMatch() {
+      const level = document.getElementById('bot-level').value;
+      const roomId = 'solo-' + Math.random().toString(36).substring(2, 7);
+      currentRoomId = roomId;
+      socket.emit('createRoom', { roomId, password: '', playerName: myData.name, userContact: myData.contact });
+      socket.emit('startGame', { roomId, playWithAI: true, aiDifficulty: level });
+    }
+
+    socket.on('roomJoined', ({ roomId, isHost }) => {
+      myData.isHost = isHost;
+      document.getElementById('modal-lobby').style.display = 'none';
+      document.getElementById('game-arena').style.display = 'block';
+      document.getElementById('room-info-label').innerText = `Sala: ${roomId}`;
+      if (isHost) document.getElementById('btn-start').style.display = 'inline-block';
+    });
+
+    socket.on('updatePlayers', ({ players }) => {
+      for (let i = 1; i <= 6; i++) {
+        const seat = document.getElementById(`seat-${i}`);
+        const p = players[i - 1];
+        if (p) {
+          seat.innerHTML = `<div class="seat-badge">${p.name}</div><div class="seat-chips">${p.chips} Fichas</div>`;
+        } else {
+          seat.innerHTML = `<div class="seat-badge">Vazio</div>`;
+        }
+      }
+    });
+
+    function requestStartGame() {
+      socket.emit('startGame', { roomId: currentRoomId, playWithAI: false });
+    }
+
+    socket.on('gameStarted', ({ pot }) => {
+      document.getElementById('pot-display').innerText = `${pot} FICHAS`;
+      document.getElementById('btn-start').style.display = 'none';
+    });
+
+    socket.on('syncHand', ({ hand, arconte, score, hasDiscarded }) => {
+      myData.hand = hand;
+      myData.arconte = arconte;
+      const container = document.getElementById('hand-display');
+      container.innerHTML = '';
+
+      // Mostra Arconte Fixo 7
+      if (arconte) {
+        const arc = document.createElement('div');
+        arc.className = 'play-card arconte-card';
+        arc.innerHTML = `<span class="card-val">7</span><span class="card-suit">${arconte.suit}</span><span class="arc-label">${arconte.name}</span>`;
+        container.appendChild(arc);
+      }
+
+      // Mostra Cartas de Fluxo
+      hand.forEach((c, idx) => {
+        const cardEl = document.createElement('div');
+        const isRed = c.suit === '♥' || c.suit === '♦';
+        cardEl.className = `play-card ${isRed ? 'card-red' : ''}`;
+        cardEl.innerHTML = `<span class="card-val">${c.rank}</span><span class="card-suit">${c.suit}</span><span class="card-elem">${c.suitName}</span>`;
+        container.appendChild(cardEl);
+      });
+
+      const scoreEl = document.getElementById('my-score');
+      scoreEl.innerText = score;
+      if (score > 21) {
+        scoreEl.style.color = '#ff4d4d';
+        document.getElementById('btn-discard').disabled = hasDiscarded;
+      } else {
+        scoreEl.style.color = '#2ecc71';
+        document.getElementById('btn-discard').disabled = true;
+      }
+    });
+
+    function playerHit() {
+      socket.emit('playerAction', { roomId: currentRoomId, action: 'HIT' });
+    }
+
+    function playerStand() {
+      socket.emit('playerAction', { roomId: currentRoomId, action: 'STAND' });
+    }
+
+    function playerDiscard() {
+      const idx = prompt('Digite o número da carta que deseja descartar (1 para a primeira, 2 para a segunda...):');
+      if (idx !== null) {
+        socket.emit('playerAction', { roomId: currentRoomId, action: 'DISCARD', discardIndex: parseInt(idx) - 1 });
+      }
+    }
+
+    socket.on('roundFinished', ({ results, winnerName }) => {
+      let msg = `🏆 VENCEDOR DA RODADA: ${winnerName}\n\n`;
+      results.forEach(r => {
+        msg += `${r.name}: ${r.score} pontos ${r.busted ? '(Estourou!)' : ''}\n`;
+      });
+      alert(msg);
+    });
+
+    socket.on('gameError', (msg) => alert(msg));
+  </script>
+</body>
+</html>
